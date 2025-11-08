@@ -1,0 +1,276 @@
+package com.example.fullapp;
+
+import jakarta.persistence.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.*;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.orm.jpa.*;
+import org.springframework.stereotype.*;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.annotation.Transactional;
+
+import javax.sql.DataSource;
+import java.util.List;
+
+// ==========================
+// ENTITY CLASSES
+// ==========================
+@Entity
+@Table(name = "courses")
+class Course {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+
+    private String courseName;
+
+    public Course() {}
+    public Course(String courseName) {
+        this.courseName = courseName;
+    }
+    public String getCourseName() {
+        return courseName;
+    }
+}
+
+@Entity
+@Table(name = "students")
+class Student {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private int id;
+
+    private String name;
+
+    @ManyToOne(cascade = CascadeType.ALL)
+    private Course course;
+
+    public Student() {}
+    public Student(String name, Course course) {
+        this.name = name;
+        this.course = course;
+    }
+
+    public int getId() { return id; }
+    public String getName() { return name; }
+    public Course getCourse() { return course; }
+}
+
+// ==========================
+// REPOSITORY LAYER
+// ==========================
+@Repository
+class StudentRepository {
+
+    @PersistenceContext
+    private EntityManager em;
+
+    // CREATE
+    public void save(Student student) {
+        em.persist(student);
+    }
+
+    // READ
+    public Student findById(int id) {
+        return em.find(Student.class, id);
+    }
+
+    public List<Student> findAll() {
+        return em.createQuery("from Student", Student.class).getResultList();
+    }
+
+    // UPDATE
+    public void update(Student student) {
+        em.merge(student);
+    }
+
+    // DELETE
+    public void delete(Student student) {
+        em.remove(student);
+    }
+}
+
+// ==========================
+// SERVICE LAYER
+// ==========================
+@Service
+class StudentService {
+
+    @Autowired
+    private StudentRepository repository;
+
+    @Transactional
+    public void createStudent(String name, String courseName) {
+        Course course = new Course(courseName);
+        Student student = new Student(name, course);
+        repository.save(student);
+        System.out.println("✅ Student Saved: " + name + " (" + courseName + ")");
+    }
+
+    @Transactional(readOnly = true)
+    public void listStudents() {
+        List<Student> students = repository.findAll();
+        System.out.println("📘 Student List:");
+        for (Student s : students) {
+            System.out.println(" - " + s.getName() + " | Course: " + s.getCourse().getCourseName());
+        }
+    }
+
+    @Transactional
+    public void updateStudentName(int id, String newName) {
+        Student s = repository.findById(id);
+        if (s != null) {
+            s = new Student(newName, s.getCourse());
+            s = repository.findById(id);
+            s.getCourse().getCourseName();
+            System.out.println("✏️ Updated Student Name to: " + newName);
+        } else {
+            System.out.println("⚠️ Student not found!");
+        }
+    }
+
+    @Transactional
+    public void deleteStudent(int id) {
+        Student s = repository.findById(id);
+        if (s != null) {
+            repository.delete(s);
+            System.out.println("🗑️ Deleted Student with ID: " + id);
+        } else {
+            System.out.println("⚠️ Student not found!");
+        }
+    }
+}
+
+// ==========================
+// TRANSACTION MANAGEMENT EXAMPLE (Bank Transfer)
+// ==========================
+@Entity
+@Table(name = "accounts")
+class Account {
+    @Id
+    private int id;
+    private String holder;
+    private double balance;
+
+    public Account() {}
+    public Account(int id, String holder, double balance) {
+        this.id = id;
+        this.holder = holder;
+        this.balance = balance;
+    }
+
+    public int getId() { return id; }
+    public String getHolder() { return holder; }
+    public double getBalance() { return balance; }
+    public void setBalance(double balance) { this.balance = balance; }
+}
+
+@Repository
+class AccountRepository {
+
+    @PersistenceContext
+    private EntityManager em;
+
+    public Account findById(int id) {
+        return em.find(Account.class, id);
+    }
+
+    public void update(Account acc) {
+        em.merge(acc);
+    }
+
+    public void save(Account acc) {
+        em.persist(acc);
+    }
+}
+
+@Service
+class BankService {
+
+    @Autowired
+    private AccountRepository accountRepo;
+
+    @Transactional
+    public void transferMoney(int fromId, int toId, double amount) {
+        Account from = accountRepo.findById(fromId);
+        Account to = accountRepo.findById(toId);
+
+        if (from == null || to == null) {
+            throw new RuntimeException("Account not found!");
+        }
+        if (from.getBalance() < amount) {
+            throw new RuntimeException("Insufficient funds!");
+        }
+
+        from.setBalance(from.getBalance() - amount);
+        to.setBalance(to.getBalance() + amount);
+
+        accountRepo.update(from);
+        accountRepo.update(to);
+
+        System.out.println("💰 Transferred ₹" + amount + " from " + from.getHolder() + " to " + to.getHolder());
+    }
+}
+
+// ==========================
+// SPRING CONFIGURATION
+// ==========================
+@Configuration
+@EnableTransactionManagement
+@ComponentScan(basePackages = "com.example.fullapp")
+public class AppConfig {
+
+    @Bean
+    public DataSource dataSource() {
+        DriverManagerDataSource ds = new DriverManagerDataSource();
+        ds.setDriverClassName("com.mysql.cj.jdbc.Driver");
+        ds.setUrl("jdbc:mysql://localhost:3306/fullappdb");
+        ds.setUsername("root");           // 🔹 Change as per your DB
+        ds.setPassword("yourpassword");   // 🔹 Change as per your DB
+        return ds;
+    }
+
+    @Bean
+    public LocalContainerEntityManagerFactoryBean entityManagerFactory() {
+        LocalContainerEntityManagerFactoryBean emf = new LocalContainerEntityManagerFactoryBean();
+        emf.setDataSource(dataSource());
+        emf.setPackagesToScan("com.example.fullapp");
+        emf.setJpaVendorAdapter(new HibernateJpaVendorAdapter());
+        return emf;
+    }
+
+    @Bean
+    public JpaTransactionManager transactionManager(EntityManagerFactory emf) {
+        return new JpaTransactionManager(emf);
+    }
+}
+
+// ==========================
+// MAIN APPLICATION
+// ==========================
+public class App {
+    public static void main(String[] args) {
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext(AppConfig.class);
+
+        StudentService studentService = context.getBean(StudentService.class);
+        BankService bankService = context.getBean(BankService.class);
+
+        // --- Dependency Injection + Hibernate CRUD ---
+        studentService.createStudent("Priyanshu", "Spring Boot");
+        studentService.createStudent("Aaryan", "Hibernate ORM");
+        studentService.listStudents();
+
+        // --- Transaction Management Example ---
+        AccountRepository repo = context.getBean(AccountRepository.class);
+        repo.save(new Account(1, "Alice", 1000));
+        repo.save(new Account(2, "Bob", 500));
+
+        try {
+            bankService.transferMoney(1, 2, 200);
+        } catch (Exception e) {
+            System.out.println("❌ Transaction Failed: " + e.getMessage());
+        }
+
+        context.close();
+    }
+}
